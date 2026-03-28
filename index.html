@@ -4,8 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Cycle 🖤</title>
-<link rel="apple-touch-icon" href="icon.png">
-  
+
 <style>
 body {
   font-family: -apple-system;
@@ -21,37 +20,35 @@ h1 { color: #ff4d6d; }
   justify-content: space-between;
   max-width: 400px;
   margin: auto;
-  align-items: center;
 }
 
-button {
+.header button {
+  width: 80px;
   background: #ff4d6d;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 10px;
-  color: white;
 }
 
 .calendar {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  gap: 8px;
   max-width: 400px;
-  margin: 15px auto;
+  margin: 20px auto;
 }
 
 .day {
   padding: 12px;
   border-radius: 10px;
   background: #1c1c25;
-  transition: 0.2s;
+  cursor: pointer;
 }
 
-.day:hover { transform: scale(1.1); }
+.selected {
+  outline: 2px solid white;
+}
 
 .period { background: #ff4d6d; }
-.predicted { background: #6c5ce7; }
-.ovulation { background: #00b894; }
+.end-day { background: #00c853; }
+.ovulation { background: #0984e3; }
 
 .card {
   background: #1c1c25;
@@ -61,12 +58,17 @@ button {
   margin: 15px auto;
 }
 
-input {
+input, button {
   width: 100%;
   padding: 10px;
   margin: 6px 0;
   border-radius: 10px;
   border: none;
+}
+
+button {
+  background: #ff4d6d;
+  color: white;
 }
 </style>
 </head>
@@ -85,8 +87,7 @@ input {
 
 <div class="card">
   <input type="date" id="startDate">
-  <input type="date" id="endDate">
-  <button onclick="saveData()">Save</button>
+  <button id="saveBtn" onclick="saveData()">Save</button>
 </div>
 
 <div class="card" id="prediction"></div>
@@ -94,6 +95,8 @@ input {
 <script>
 
 let currentDate = new Date();
+let editingIndex = null;
+let selectedDate = null;
 
 function getData() {
   return JSON.parse(localStorage.getItem("cycleData")) || [];
@@ -101,87 +104,139 @@ function getData() {
 
 function saveData() {
   let start = document.getElementById("startDate").value;
-  let end = document.getElementById("endDate").value;
+  if (!start) return;
 
   let data = getData();
-  data.push({ start, end });
+
+  if (editingIndex !== null) {
+    data[editingIndex].start = start;
+    editingIndex = null;
+  } else {
+    data.push({ start });
+  }
 
   localStorage.setItem("cycleData", JSON.stringify(data));
 
+  document.getElementById("saveBtn").innerText = "Save";
   renderCalendar();
 }
 
-function getAvgCycle(data) {
-  if (data.length < 2) return 28;
-
-  let diffs = [];
-  for (let i=1;i<data.length;i++) {
-    let d1=new Date(data[i-1].start);
-    let d2=new Date(data[i].start);
-    diffs.push((d2-d1)/(1000*60*60*24));
-  }
-
-  return Math.round(diffs.reduce((a,b)=>a+b)/diffs.length);
-}
-
+/* month navigation */
 function changeMonth(dir) {
   currentDate.setMonth(currentDate.getMonth()+dir);
   renderCalendar();
 }
 
+/* calendar */
 function renderCalendar() {
-  let cal=document.getElementById("calendar");
-  cal.innerHTML="";
+  let cal = document.getElementById("calendar");
+  cal.innerHTML = "";
 
-  let year=currentDate.getFullYear();
-  let month=currentDate.getMonth();
+  let year = currentDate.getFullYear();
+  let month = currentDate.getMonth();
 
   document.getElementById("monthLabel").innerText =
     currentDate.toLocaleString('default',{month:'long',year:'numeric'});
 
-  let firstDay=new Date(year,month,1).getDay();
-  let days=new Date(year,month+1,0).getDate();
+  // ✅ FIXED: local date (NO UTC)
+  let minDate = `${year}-${String(month+1).padStart(2,'0')}-01`;
+  let maxDate = `${year}-${String(month+1).padStart(2,'0')}-${new Date(year, month+1, 0).getDate()}`;
 
-  let data=getData();
-  let avg=getAvgCycle(data);
+  document.getElementById("startDate").min = minDate;
+  document.getElementById("startDate").max = maxDate;
 
-  let last=data.length?new Date(data[data.length-1].start):null;
+  let firstDay = new Date(year, month, 1).getDay();
+  let days = new Date(year, month+1, 0).getDate();
 
-  let predicted=last?new Date(last.getTime()+avg*86400000):null;
-  let ovu=last?new Date(last.getTime()+(avg-14)*86400000):null;
+  let data = getData();
 
-  for(let i=0;i<firstDay;i++) cal.innerHTML+="<div></div>";
+  // sort data
+  data.sort((a,b)=> new Date(a.start) - new Date(b.start));
 
-  for(let d=1;d<=days;d++) {
-    let date=new Date(year,month,d);
-    let cls="day";
-
-    data.forEach(e=>{
-      let s=new Date(e.start);
-      let en=e.end?new Date(e.end):s;
-      if(date>=s && date<=en) cls+=" period";
-    });
-
-    if(predicted && date.toDateString()===predicted.toDateString()) cls+=" predicted";
-    if(ovu && date.toDateString()===ovu.toDateString()) cls+=" ovulation";
-
-    cal.innerHTML+=`<div class="${cls}" onclick="selectDate('${date.toISOString()}')">${d}</div>`;
+  let avg = 28;
+  if (data.length > 1) {
+    let diffs = [];
+    for (let i=1;i<data.length;i++) {
+      let d1=new Date(data[i-1].start);
+      let d2=new Date(data[i].start);
+      diffs.push((d2-d1)/(1000*60*60*24));
+    }
+    avg = Math.round(diffs.reduce((a,b)=>a+b)/diffs.length);
   }
 
-  updatePrediction(predicted,ovu,avg);
+  let last = data.length ? new Date(data[data.length-1].start) : null;
+  let ovulation = last ? new Date(last.getTime()+(avg-14)*86400000) : null;
+
+  for (let i=0;i<firstDay;i++) cal.innerHTML += "<div></div>";
+
+  for (let d=1; d<=days; d++) {
+    let date = new Date(year, month, d);
+    let cls = "day";
+
+    data.forEach((entry)=>{
+      let start = new Date(entry.start);
+
+      for(let i=0;i<7;i++){
+        let temp = new Date(start);
+        temp.setDate(temp.getDate()+i);
+
+        if(date.toDateString()===temp.toDateString()){
+          cls += " period";
+        }
+
+        if(i===6 && date.toDateString()===temp.toDateString()){
+          cls += " end-day";
+        }
+      }
+    });
+
+    if(ovulation && date.toDateString()===ovulation.toDateString()){
+      cls += " ovulation";
+    }
+
+    let dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+
+    if(selectedDate === dateStr){
+      cls += " selected";
+    }
+
+    cal.innerHTML += `<div class="${cls}" onclick="handleClick('${dateStr}')">${d}</div>`;
+  }
+
+  updatePrediction(last,avg,ovulation);
 }
 
-function selectDate(dateStr) {
-  let d=dateStr.split("T")[0];
-  document.getElementById("startDate").value=d;
+/* click */
+function handleClick(dateStr){
+  selectedDate = dateStr;
+
+  let data = getData();
+  let index = data.findIndex(e => e.start === dateStr);
+
+  document.getElementById("startDate").value = dateStr;
+
+  if(index !== -1){
+    editingIndex = index;
+    document.getElementById("saveBtn").innerText = "Update";
+  } else {
+    editingIndex = null;
+    document.getElementById("saveBtn").innerText = "Save";
+  }
+
+  renderCalendar();
 }
 
-function updatePrediction(p,o,avg) {
-  if(!p) return;
-  document.getElementById("prediction").innerHTML=
+/* prediction */
+function updatePrediction(last,avg,ovulation){
+  if(!last) return;
+
+  let next = new Date(last);
+  next.setDate(next.getDate()+avg);
+
+  document.getElementById("prediction").innerHTML =
     `Avg Cycle: ${avg} days<br>
-     Next: ${p.toDateString()}<br>
-     Ovulation: ${o.toDateString()}`;
+     Next: ${next.toDateString()}<br>
+     Ovulation: ${ovulation.toDateString()}`;
 }
 
 renderCalendar();
